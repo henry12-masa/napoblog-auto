@@ -1,0 +1,4 @@
+article.json
+*.svg
+*.png
+__pycache__/
