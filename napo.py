@@ -68,16 +68,21 @@ def daily_slug(day=None):
 
 # ---------------------------------------------------------------- WordPress
 def _auth():
+    """環境変数があればBasic認証ヘッダーを作る。
+    なければNone（クラウド環境の「API認証情報」でプロキシが付ける前提）。"""
     user, pw = os.environ.get("WP_USER"), os.environ.get("WP_APP_PASSWORD")
     if not user or not pw:
-        die("環境変数 WP_USER / WP_APP_PASSWORD が未設定です")
+        return None
     return "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
 
 
 def wp(path, method="GET", payload=None, raw=None, headers=None):
     """GETは3回まで再試行。POSTは二重作成を防ぐため1回だけ送る。"""
     url = f"{SITE}/wp-json/wp/v2/{path}"
-    hdr = {"Authorization": _auth(), "User-Agent": "napoblog-claude/1.0"}
+    hdr = {"User-Agent": "napoblog-claude/1.0"}
+    auth = _auth()
+    if auth:
+        hdr["Authorization"] = auth
     data = None
     if payload is not None:
         data = json.dumps(payload).encode()
@@ -348,7 +353,19 @@ def save(path, a):
         json.dump(a, f, ensure_ascii=False, indent=1)
 
 
+def check_login():
+    try:
+        me = wp("users/me?context=edit&_fields=id,name,capabilities")
+    except WpError as e:
+        how = "環境変数 WP_USER/WP_APP_PASSWORD" if _auth() else "クラウド環境の「API認証情報」(Basic, napoblog.com)"
+        die(f"WordPressにログインできません（{how}を確認）: {e}")
+    if not (me.get("capabilities") or {}).get("edit_posts"):
+        die("ログインはできましたが、投稿を編集する権限がありません")
+    return me
+
+
 def cmd_status():
+    check_login()
     day = today()
     existing = wp(f"posts?context=edit&status=draft,publish,pending,future,private&slug={daily_slug(day)}&_fields=id,status,title")
     recent_titles = [p["title"]["raw"] for p in wp("posts?context=edit&status=draft,publish&per_page=40&orderby=date&order=desc&_fields=title")]
